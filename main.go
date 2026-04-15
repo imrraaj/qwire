@@ -6,28 +6,27 @@ import (
 )
 
 func main() {
-
-	p := protocol.Protocol{
-		Version:     1,
-		PayloadType: protocol.CREATE_QUEUE,
-		Payload:     []byte{},
-		KeyValuePairs: map[string]string{
-			"foo": "bar",
-		},
+	msg := protocol.PushQueueMessage{
+		QueueName:   []byte("foo"),
+		MessageBody: []byte("bar"),
 	}
 
-	buf, ok := protocol.StringifyProtocol(p)
-	if ok != nil {
-		fmt.Println("Error stringifying protocol:", ok)
-		return
-	}
-
-	p, err := protocol.ParseProtocol(buf)
+	buf, err := protocol.Marshal(msg)
 	if err != nil {
-		fmt.Println("Error parsing protocol:", err)
+		fmt.Println("Error marshaling protocol message:", err)
 		return
 	}
-	fmt.Printf(`	Version: %d
-	Payload Type: %d
-	Key-Value Pairs: %v`, p.Version, p.PayloadType, p.KeyValuePairs)
+
+	parsed, err := protocol.Unmarshal(buf)
+	if err != nil {
+		fmt.Println("Error unmarshaling protocol message:", err)
+		return
+	}
+
+	switch msg := parsed.(type) {
+	case protocol.PushQueueMessage:
+		fmt.Printf("Version: %d\nPayload Type: %d\nQueue Name: %s\nMessage Body: %s\n", protocol.Version, msg.Type(), msg.QueueName, msg.MessageBody)
+	default:
+		fmt.Printf("Version: %d\nPayload Type: %d\n", protocol.Version, msg.Type())
+	}
 }

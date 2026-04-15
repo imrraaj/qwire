@@ -2,107 +2,213 @@ package protocol
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
+)
+
+const (
+	Version    uint8 = 0x01
+	HeaderSize       = 6
+	trueByte   byte  = 0x01
 )
 
 type PayloadType uint8
 
 const (
-	CREATE_QUEUE PayloadType = iota
-	PUSH_QUEUE   PayloadType = iota
+	EMPTY PayloadType = iota
+	CREATE_QUEUE
+	JOIN_QUEUE
+	PUSH_QUEUE
 )
 
-func takeBytes(data *[]byte, n int) []byte {
-	if n > len(*data) {
-		result := *data
-		*data = (*data)[:0]
-		return result
-	}
-	result := (*data)[:n]
-	*data = (*data)[n:]
-	return result
+type Message interface {
+	Type() PayloadType
 }
 
-func takeUint32(slice *[]byte) uint32 {
-	bytes := takeBytes(slice, 4)
-	if len(bytes) < 4 {
-		return 0
-	}
-	return binary.LittleEndian.Uint32(bytes)
+type EmptyMessage struct {
+	Value bool
 }
 
-type Protocol struct {
-	Version       uint8
-	PayloadType   PayloadType
-	Payload       []byte
-	KeyValuePairs map[string]string
+func (EmptyMessage) Type() PayloadType {
+	return EMPTY
 }
 
-func ParseProtocol(msg []byte) (Protocol, error) {
-	var p Protocol
-	p.Version = msg[0]
-	p.PayloadType = PayloadType(msg[1])
-	p.Payload = msg[2:]
-	p.KeyValuePairs = make(map[string]string)
-
-	keyLength := takeUint32(&p.Payload)
-	if keyLength == 0 {
-		return Protocol{}, fmt.Errorf("Key length is zero")
-	}
-	if len(p.Payload) < int(keyLength) {
-		return Protocol{}, fmt.Errorf("Payload too short for key length %d", keyLength)
-	}
-	keyBytes := takeBytes(&p.Payload, int(keyLength))
-	if len(keyBytes) == 0 {
-		return Protocol{}, fmt.Errorf("Key length is non-zero but no key bytes found")
-	}
-	valueLength := takeUint32(&p.Payload)
-	if valueLength == 0 {
-		p.KeyValuePairs[string(keyBytes)] = ""
-		return p, nil
-	}
-	if len(p.Payload) < int(valueLength) {
-		return Protocol{}, fmt.Errorf("Payload too short for value length %d", valueLength)
-	}
-	valueBytes := takeBytes(&p.Payload, int(valueLength))
-	if len(valueBytes) == 0 {
-		return Protocol{}, fmt.Errorf("Value length is non-zero but no value bytes found")
-	}
-	p.KeyValuePairs[string(keyBytes)] = string(valueBytes)
-	return p, nil
+type CreateQueueMessage struct {
+	QueueName []byte
 }
 
-func StringifyProtocol(p Protocol) ([]byte, error) {
-	var payloadSize int
-	for k, v := range p.KeyValuePairs {
-		if len(k) != 0 { // Only include non-empty keys
-			payloadSize += 4 + len(k) // 4 bytes for length of key + key
-		}
-		if len(v) != 0 { // Only include non-empty values
-			payloadSize += 4 + len(v) // 4 bytes for length of value + value
-		}
+func (CreateQueueMessage) Type() PayloadType {
+	return CREATE_QUEUE
+}
+
+type JoinQueueMessage struct {
+	QueueName []byte
+}
+
+func (JoinQueueMessage) Type() PayloadType {
+	return JOIN_QUEUE
+}
+
+type PushQueueMessage struct {
+	QueueName   []byte
+	MessageBody []byte
+}
+
+func (PushQueueMessage) Type() PayloadType {
+	return PUSH_QUEUE
+}
+
+func Marshal(msg Message) ([]byte, error) {
+	if msg == nil {
+		return nil, errors.New("message is nil")
 	}
 
-	buf := make([]byte, 0, 6+payloadSize) // 6 bytes for header + payload
-	buf = append(buf, byte(p.Version))
-	buf = append(buf, uint8(p.PayloadType))
-
-	for k, v := range p.KeyValuePairs {
-		key := []byte(k)
-		value := []byte(v)
-
-		if len(key) != 0 {
-			keyLenBuf := make([]byte, 4)
-			binary.LittleEndian.PutUint32(keyLenBuf, uint32(len(key)))
-			buf = append(buf, keyLenBuf...)
-			buf = append(buf, key...)
-		}
-		if len(value) != 0 {
-			valueLenBuf := make([]byte, 4)
-			binary.LittleEndian.PutUint32(valueLenBuf, uint32(len(value)))
-			buf = append(buf, valueLenBuf...)
-			buf = append(buf, value...)
-		}
+	payload, err := marshalPayload(msg)
+	if err != nil {
+		return nil, err
 	}
-	return buf, nil
+
+	if len(payload) > int(^uint32(0)) {
+		return nil, fmt.Errorf("payload too large: %d", len(payload))
+	}
+
+	frame := make([]byte, HeaderSize+len(payload))
+	frame[0] = Version
+	frame[1] = byte(msg.Type())
+	binary.LittleEndian.PutUint32(frame[2:HeaderSize], uint32(len(payload)))
+	copy(frame[HeaderSize:], payload)
+	return frame, nil
+}
+
+func Unmarshal(raw []byte) (Message, error) {
+	if len(raw) < HeaderSize {
+		return nil, fmt.Errorf("frame too short: got %d bytes, need at least %d", len(raw), HeaderSize)
+	}
+
+	version := raw[0]
+	if version != Version {
+		return nil, fmt.Errorf("unsupported version: %d", version)
+	}
+
+	payloadType := PayloadType(raw[1])
+	payloadLength := binary.LittleEndian.Uint32(raw[2:HeaderSize])
+	actualPayloadLength := len(raw) - HeaderSize
+	if payloadLength != uint32(actualPayloadLength) {
+		return nil, fmt.Errorf("payload length mismatch: declared %d, actual %d", payloadLength, actualPayloadLength)
+	}
+
+	payload := raw[HeaderSize:]
+	return unmarshalPayload(payloadType, payload)
+}
+
+func marshalPayload(msg Message) ([]byte, error) {
+	switch msg := msg.(type) {
+	case EmptyMessage:
+		if msg.Value {
+			return []byte{trueByte}, nil
+		}
+		return nil, nil
+	case CreateQueueMessage:
+		return marshalQueueNamePayload(msg.QueueName)
+	case JoinQueueMessage:
+		return marshalQueueNamePayload(msg.QueueName)
+	case PushQueueMessage:
+		return marshalPushQueuePayload(msg)
+	default:
+		return nil, fmt.Errorf("unsupported message type %T", msg)
+	}
+}
+
+func unmarshalPayload(payloadType PayloadType, payload []byte) (Message, error) {
+	switch payloadType {
+	case EMPTY:
+		return unmarshalEmptyMessage(payload)
+	case CREATE_QUEUE:
+		return unmarshalCreateQueueMessage(payload)
+	case JOIN_QUEUE:
+		return unmarshalJoinQueueMessage(payload)
+	case PUSH_QUEUE:
+		return unmarshalPushQueueMessage(payload)
+	default:
+		return nil, fmt.Errorf("unknown payload type: %d", payloadType)
+	}
+}
+
+func marshalQueueNamePayload(queueName []byte) ([]byte, error) {
+	if len(queueName) == 0 {
+		return nil, errors.New("queue name must not be empty")
+	}
+	return cloneBytes(queueName), nil
+}
+
+func marshalPushQueuePayload(msg PushQueueMessage) ([]byte, error) {
+	if len(msg.QueueName) == 0 {
+		return nil, errors.New("queue name must not be empty")
+	}
+
+	if len(msg.QueueName) > int(^uint32(0))-4-len(msg.MessageBody) {
+		return nil, fmt.Errorf("payload too large: queue name %d bytes, message body %d bytes", len(msg.QueueName), len(msg.MessageBody))
+	}
+
+	payload := make([]byte, 4+len(msg.QueueName)+len(msg.MessageBody))
+	binary.LittleEndian.PutUint32(payload[:4], uint32(len(msg.QueueName)))
+	copy(payload[4:], msg.QueueName)
+	copy(payload[4+len(msg.QueueName):], msg.MessageBody)
+	return payload, nil
+}
+
+func unmarshalEmptyMessage(payload []byte) (Message, error) {
+	switch len(payload) {
+	case 0:
+		return EmptyMessage{Value: false}, nil
+	case 1:
+		if payload[0] != trueByte {
+			return nil, fmt.Errorf("invalid EMPTY payload byte: %d", payload[0])
+		}
+		return EmptyMessage{Value: true}, nil
+	default:
+		return nil, fmt.Errorf("invalid EMPTY payload length: %d", len(payload))
+	}
+}
+
+func unmarshalCreateQueueMessage(payload []byte) (Message, error) {
+	if len(payload) == 0 {
+		return nil, errors.New("queue name must not be empty")
+	}
+	return CreateQueueMessage{QueueName: cloneBytes(payload)}, nil
+}
+
+func unmarshalJoinQueueMessage(payload []byte) (Message, error) {
+	if len(payload) == 0 {
+		return nil, errors.New("queue name must not be empty")
+	}
+	return JoinQueueMessage{QueueName: cloneBytes(payload)}, nil
+}
+
+func unmarshalPushQueueMessage(payload []byte) (Message, error) {
+	if len(payload) < 4 {
+		return nil, fmt.Errorf("PUSH_QUEUE payload too short: got %d bytes", len(payload))
+	}
+
+	queueNameLength := binary.LittleEndian.Uint32(payload[:4])
+	if queueNameLength == 0 {
+		return nil, errors.New("queue name must not be empty")
+	}
+
+	if queueNameLength > uint32(len(payload)-4) {
+		return nil, fmt.Errorf("queue name length exceeds payload: declared %d, available %d", queueNameLength, len(payload)-4)
+	}
+
+	queueNameEnd := 4 + int(queueNameLength)
+	return PushQueueMessage{
+		QueueName:   cloneBytes(payload[4:queueNameEnd]),
+		MessageBody: cloneBytes(payload[queueNameEnd:]),
+	}, nil
+}
+
+func cloneBytes(src []byte) []byte {
+	if len(src) == 0 {
+		return nil
+	}
+	return append([]byte(nil), src...)
 }

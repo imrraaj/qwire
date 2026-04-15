@@ -6,232 +6,193 @@ import (
 	"testing"
 )
 
-func TestParseProtocol(t *testing.T) {
+func TestMarshal(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    []byte
-		expected Protocol
+		input    Message
+		expected []byte
 		wantErr  bool
 	}{
 		{
-			name: "Valid PUSH_QUEUE message",
-			input: []byte{
-				0x00,                   // Version
-				0x01,                   // Payload Type (PUSH_QUEUE)
-				0x03, 0x00, 0x00, 0x00, // Key Length (3)
-				0x66, 0x6F, 0x6F, // Key "foo"
-				0x03, 0x00, 0x00, 0x00, // Value Length (3)
-				0x62, 0x61, 0x72, // Value "bar"
-			},
-			expected: Protocol{
-				Version:     0,
-				PayloadType: PUSH_QUEUE,
-				KeyValuePairs: map[string]string{
-					"foo": "bar",
-				},
-			},
-			wantErr: false,
+			name:     "EMPTY false",
+			input:    EmptyMessage{Value: false},
+			expected: []byte{0x01, 0x00, 0x00, 0x00, 0x00, 0x00},
 		},
 		{
-			name: "Valid CREATE_QUEUE message",
-			input: []byte{
-				0x00,                   // Version
-				0x00,                   // Payload Type (CREATE_QUEUE)
-				0x05, 0x00, 0x00, 0x00, // Key Length (5)
-				0x71, 0x75, 0x65, 0x75, 0x65, // Key "queue"
-				0x00, 0x00, 0x00, 0x00, // Value Length (0)
-			},
-			expected: Protocol{
-				Version:     0,
-				PayloadType: CREATE_QUEUE,
-				KeyValuePairs: map[string]string{
-					"queue": "",
-				},
-			},
-			wantErr: false,
+			name:     "EMPTY true",
+			input:    EmptyMessage{Value: true},
+			expected: []byte{0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01},
 		},
 		{
-			name: "Empty key and value",
-			input: []byte{
-				0x00,                   // Version
-				0x01,                   // Payload Type (PUSH_QUEUE)
-				0x04, 0x00, 0x00, 0x00, // Key Length (4)
-				0x74, 0x65, 0x73, 0x74, // Key "test"
-				0x05, 0x00, 0x00, 0x00, // Value Length (5)
-				0x76, 0x61, 0x6C, 0x75, 0x65, // Value "value"
-			},
-			expected: Protocol{
-				Version:     0,
-				PayloadType: PUSH_QUEUE,
-				KeyValuePairs: map[string]string{
-					"test": "value",
-				},
-			},
-			wantErr: false,
+			name:     "CREATE_QUEUE",
+			input:    CreateQueueMessage{QueueName: []byte("foo")},
+			expected: []byte{0x01, 0x01, 0x03, 0x00, 0x00, 0x00, 0x66, 0x6F, 0x6F},
 		},
 		{
-			name: "Zero key length should error",
-			input: []byte{
-				0x00,                   // Version
-				0x01,                   // Payload Type (PUSH_QUEUE)
-				0x00, 0x00, 0x00, 0x00, // Key Length (0)
-			},
-			expected: Protocol{},
-			wantErr:  true,
+			name:     "JOIN_QUEUE",
+			input:    JoinQueueMessage{QueueName: []byte("foo")},
+			expected: []byte{0x01, 0x02, 0x03, 0x00, 0x00, 0x00, 0x66, 0x6F, 0x6F},
 		},
 		{
-			name: "Key length exceeds available data",
-			input: []byte{
-				0x00,                   // Version
-				0x01,                   // Payload Type (PUSH_QUEUE)
-				0x10, 0x00, 0x00, 0x00, // Key Length (16) - too large
-				0x66, 0x6F, 0x6F, // Only 3 bytes available
-			},
-			expected: Protocol{},
-			wantErr:  true,
+			name:     "PUSH_QUEUE",
+			input:    PushQueueMessage{QueueName: []byte("foo"), MessageBody: []byte("bar")},
+			expected: []byte{0x01, 0x03, 0x0A, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x66, 0x6F, 0x6F, 0x62, 0x61, 0x72},
 		},
 		{
-			name: "Value length exceeds available data",
-			input: []byte{
-				0x00,                   // Version
-				0x01,                   // Payload Type (PUSH_QUEUE)
-				0x03, 0x00, 0x00, 0x00, // Key Length (3)
-				0x66, 0x6F, 0x6F, // Key "foo"
-				0x10, 0x00, 0x00, 0x00, // Value Length (16) - too large
-				0x62, 0x61, 0x72, // Only 3 bytes available
-			},
-			expected: Protocol{},
-			wantErr:  true,
+			name:    "CREATE_QUEUE empty queue name",
+			input:   CreateQueueMessage{QueueName: nil},
+			wantErr: true,
+		},
+		{
+			name:    "JOIN_QUEUE empty queue name",
+			input:   JoinQueueMessage{QueueName: nil},
+			wantErr: true,
+		},
+		{
+			name:    "PUSH_QUEUE empty queue name",
+			input:   PushQueueMessage{QueueName: nil, MessageBody: []byte("bar")},
+			wantErr: true,
+		},
+		{
+			name:    "nil message",
+			input:   nil,
+			wantErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := ParseProtocol(tt.input)
+			result, err := Marshal(tt.input)
 
 			if tt.wantErr {
 				if err == nil {
-					t.Errorf("ParseProtocol() expected error but got none")
+					t.Fatalf("Marshal() expected error but got none")
 				}
 				return
 			}
 
 			if err != nil {
-				t.Errorf("ParseProtocol() unexpected error: %v", err)
-				return
+				t.Fatalf("Marshal() unexpected error: %v", err)
 			}
 
-			if result.Version != tt.expected.Version {
-				t.Errorf("ParseProtocol() Version = %v, want %v", result.Version, tt.expected.Version)
-			}
-
-			if result.PayloadType != tt.expected.PayloadType {
-				t.Errorf("ParseProtocol() PayloadType = %v, want %v", result.PayloadType, tt.expected.PayloadType)
-			}
-
-			if !reflect.DeepEqual(result.KeyValuePairs, tt.expected.KeyValuePairs) {
-				t.Errorf("ParseProtocol() KeyValuePairs = %v, want %v", result.KeyValuePairs, tt.expected.KeyValuePairs)
+			if !bytes.Equal(result, tt.expected) {
+				t.Fatalf("Marshal() = %x, want %x", result, tt.expected)
 			}
 		})
 	}
 }
 
-func TestStringifyProtocol(t *testing.T) {
+func TestUnmarshal(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    Protocol
-		expected []byte
+		input    []byte
+		expected Message
 		wantErr  bool
 	}{
 		{
-			name: "Valid PUSH_QUEUE message",
-			input: Protocol{
-				Version:     0,
-				PayloadType: PUSH_QUEUE,
-				KeyValuePairs: map[string]string{
-					"foo": "bar",
-				},
-			},
-			expected: []byte{
-				0x00,                   // Version
-				0x01,                   // Payload Type (PUSH_QUEUE)
-				0x03, 0x00, 0x00, 0x00, // Key Length (3)
-				0x66, 0x6F, 0x6F, // Key "foo"
-				0x03, 0x00, 0x00, 0x00, // Value Length (3)
-				0x62, 0x61, 0x72, // Value "bar"
-			},
-			wantErr: false,
+			name:     "EMPTY false",
+			input:    []byte{0x01, 0x00, 0x00, 0x00, 0x00, 0x00},
+			expected: EmptyMessage{Value: false},
 		},
 		{
-			name: "Valid CREATE_QUEUE message with empty value",
-			input: Protocol{
-				Version:     0,
-				PayloadType: CREATE_QUEUE,
-				KeyValuePairs: map[string]string{
-					"queue": "",
-				},
-			},
-			expected: []byte{
-				0x00,                   // Version
-				0x00,                   // Payload Type (CREATE_QUEUE)
-				0x05, 0x00, 0x00, 0x00, // Key Length (5)
-				0x71, 0x75, 0x65, 0x75, 0x65, // Key "queue"
-			},
-			wantErr: false,
+			name:     "EMPTY true",
+			input:    []byte{0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01},
+			expected: EmptyMessage{Value: true},
 		},
 		{
-			name: "Empty key and non-empty value",
-			input: Protocol{
-				Version:     0,
-				PayloadType: PUSH_QUEUE,
-				KeyValuePairs: map[string]string{
-					"": "value",
-				},
-			},
-			expected: []byte{
-				0x00,                   // Version
-				0x01,                   // Payload Type (PUSH_QUEUE)
-				0x05, 0x00, 0x00, 0x00, // Value Length (5)
-				0x76, 0x61, 0x6C, 0x75, 0x65, // Value "value"
-			},
-			wantErr: false,
+			name:     "CREATE_QUEUE",
+			input:    []byte{0x01, 0x01, 0x03, 0x00, 0x00, 0x00, 0x66, 0x6F, 0x6F},
+			expected: CreateQueueMessage{QueueName: []byte("foo")},
 		},
 		{
-			name: "Both empty key and value",
-			input: Protocol{
-				Version:     0,
-				PayloadType: CREATE_QUEUE,
-				KeyValuePairs: map[string]string{
-					"": "",
-				},
-			},
-			expected: []byte{
-				0x00, // Version
-				0x00, // Payload Type (CREATE_QUEUE)
-			},
-			wantErr: false,
+			name:     "JOIN_QUEUE",
+			input:    []byte{0x01, 0x02, 0x03, 0x00, 0x00, 0x00, 0x66, 0x6F, 0x6F},
+			expected: JoinQueueMessage{QueueName: []byte("foo")},
+		},
+		{
+			name:     "PUSH_QUEUE",
+			input:    []byte{0x01, 0x03, 0x0A, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x66, 0x6F, 0x6F, 0x62, 0x61, 0x72},
+			expected: PushQueueMessage{QueueName: []byte("foo"), MessageBody: []byte("bar")},
+		},
+		{
+			name:    "frame too short",
+			input:   []byte{0x01, 0x03, 0x0A},
+			wantErr: true,
+		},
+		{
+			name:    "unsupported version",
+			input:   []byte{0x02, 0x00, 0x00, 0x00, 0x00, 0x00},
+			wantErr: true,
+		},
+		{
+			name:    "unknown payload type",
+			input:   []byte{0x01, 0x7F, 0x00, 0x00, 0x00, 0x00},
+			wantErr: true,
+		},
+		{
+			name:    "truncated payload",
+			input:   []byte{0x01, 0x01, 0x03, 0x00, 0x00, 0x00, 0x66, 0x6F},
+			wantErr: true,
+		},
+		{
+			name:    "trailing bytes",
+			input:   []byte{0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF},
+			wantErr: true,
+		},
+		{
+			name:    "invalid EMPTY payload byte",
+			input:   []byte{0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00},
+			wantErr: true,
+		},
+		{
+			name:    "invalid EMPTY payload length",
+			input:   []byte{0x01, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x01},
+			wantErr: true,
+		},
+		{
+			name:    "CREATE_QUEUE empty queue name",
+			input:   []byte{0x01, 0x01, 0x00, 0x00, 0x00, 0x00},
+			wantErr: true,
+		},
+		{
+			name:    "JOIN_QUEUE empty queue name",
+			input:   []byte{0x01, 0x02, 0x00, 0x00, 0x00, 0x00},
+			wantErr: true,
+		},
+		{
+			name:    "PUSH_QUEUE payload too short",
+			input:   []byte{0x01, 0x03, 0x03, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00},
+			wantErr: true,
+		},
+		{
+			name:    "PUSH_QUEUE zero queue name length",
+			input:   []byte{0x01, 0x03, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+			wantErr: true,
+		},
+		{
+			name:    "PUSH_QUEUE queue name length exceeds payload",
+			input:   []byte{0x01, 0x03, 0x07, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x66, 0x6F, 0x6F},
+			wantErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := StringifyProtocol(tt.input)
+			result, err := Unmarshal(tt.input)
 
 			if tt.wantErr {
 				if err == nil {
-					t.Errorf("StringifyProtocol() expected error but got none")
+					t.Fatalf("Unmarshal() expected error but got none")
 				}
 				return
 			}
 
 			if err != nil {
-				t.Errorf("StringifyProtocol() unexpected error: %v", err)
-				return
+				t.Fatalf("Unmarshal() unexpected error: %v", err)
 			}
 
-			if !bytes.Equal(result, tt.expected) {
-				t.Errorf("StringifyProtocol() = %v, want %v", result, tt.expected)
-				t.Errorf("StringifyProtocol() hex = %x, want %x", result, tt.expected)
+			if !reflect.DeepEqual(result, tt.expected) {
+				t.Fatalf("Unmarshal() = %#v, want %#v", result, tt.expected)
 			}
 		})
 	}
@@ -240,219 +201,70 @@ func TestStringifyProtocol(t *testing.T) {
 func TestRoundTrip(t *testing.T) {
 	tests := []struct {
 		name     string
-		original Protocol
+		original Message
 	}{
-		{
-			name: "PUSH_QUEUE round trip",
-			original: Protocol{
-				Version:     0,
-				PayloadType: PUSH_QUEUE,
-				KeyValuePairs: map[string]string{
-					"myqueue": "hello world",
-				},
-			},
-		},
-		{
-			name: "CREATE_QUEUE round trip",
-			original: Protocol{
-				Version:     0,
-				PayloadType: CREATE_QUEUE,
-				KeyValuePairs: map[string]string{
-					"newqueue": "",
-				},
-			},
-		},
-		{
-			name: "Unicode characters",
-			original: Protocol{
-				Version:     0,
-				PayloadType: PUSH_QUEUE,
-				KeyValuePairs: map[string]string{
-					"测试": "🚀 unicode test",
-				},
-			},
-		},
+		{name: "EMPTY false", original: EmptyMessage{Value: false}},
+		{name: "EMPTY true", original: EmptyMessage{Value: true}},
+		{name: "CREATE_QUEUE", original: CreateQueueMessage{QueueName: []byte("queue")}},
+		{name: "JOIN_QUEUE", original: JoinQueueMessage{QueueName: []byte("queue")}},
+		{name: "PUSH_QUEUE", original: PushQueueMessage{QueueName: []byte("queue"), MessageBody: []byte{0x00, 0xFF, 0x01}}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Stringify the protocol
-			serialized, err := StringifyProtocol(tt.original)
+			serialized, err := Marshal(tt.original)
 			if err != nil {
-				t.Fatalf("StringifyProtocol() error: %v", err)
+				t.Fatalf("Marshal() error: %v", err)
 			}
 
-			// Parse it back
-			parsed, err := ParseProtocol(serialized)
+			parsed, err := Unmarshal(serialized)
 			if err != nil {
-				t.Fatalf("ParseProtocol() error: %v", err)
+				t.Fatalf("Unmarshal() error: %v", err)
 			}
 
-			// Compare
-			if parsed.Version != tt.original.Version {
-				t.Errorf("Round trip Version = %v, want %v", parsed.Version, tt.original.Version)
-			}
-
-			if parsed.PayloadType != tt.original.PayloadType {
-				t.Errorf("Round trip PayloadType = %v, want %v", parsed.PayloadType, tt.original.PayloadType)
-			}
-
-			if !reflect.DeepEqual(parsed.KeyValuePairs, tt.original.KeyValuePairs) {
-				t.Errorf("Round trip KeyValuePairs = %v, want %v", parsed.KeyValuePairs, tt.original.KeyValuePairs)
+			if !reflect.DeepEqual(parsed, tt.original) {
+				t.Fatalf("round trip = %#v, want %#v", parsed, tt.original)
 			}
 		})
 	}
 }
 
 func TestPayloadTypeConstants(t *testing.T) {
-	if CREATE_QUEUE != 0 {
-		t.Errorf("CREATE_QUEUE = %v, want 0", CREATE_QUEUE)
+	if EMPTY != 0 {
+		t.Fatalf("EMPTY = %v, want 0", EMPTY)
 	}
 
-	if PUSH_QUEUE != 1 {
-		t.Errorf("PUSH_QUEUE = %v, want 2", PUSH_QUEUE)
-	}
-}
-
-func TestTakeBytes(t *testing.T) {
-	tests := []struct {
-		name      string
-		input     []byte
-		takeSize  int
-		expected  []byte
-		remaining []byte
-	}{
-		{
-			name:      "Normal take",
-			input:     []byte{1, 2, 3, 4, 5},
-			takeSize:  3,
-			expected:  []byte{1, 2, 3},
-			remaining: []byte{4, 5},
-		},
-		{
-			name:      "Take all",
-			input:     []byte{1, 2, 3},
-			takeSize:  3,
-			expected:  []byte{1, 2, 3},
-			remaining: []byte{},
-		},
-		{
-			name:      "Take more than available",
-			input:     []byte{1, 2},
-			takeSize:  5,
-			expected:  []byte{1, 2},
-			remaining: []byte{},
-		},
-		{
-			name:      "Take from empty slice",
-			input:     []byte{},
-			takeSize:  3,
-			expected:  []byte{},
-			remaining: []byte{},
-		},
+	if CREATE_QUEUE != 1 {
+		t.Fatalf("CREATE_QUEUE = %v, want 1", CREATE_QUEUE)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			data := make([]byte, len(tt.input))
-			copy(data, tt.input)
+	if JOIN_QUEUE != 2 {
+		t.Fatalf("JOIN_QUEUE = %v, want 2", JOIN_QUEUE)
+	}
 
-			result := takeBytes(&data, tt.takeSize)
-
-			if !bytes.Equal(result, tt.expected) {
-				t.Errorf("takeBytes() = %v, want %v", result, tt.expected)
-			}
-
-			if !bytes.Equal(data, tt.remaining) {
-				t.Errorf("remaining data = %v, want %v", data, tt.remaining)
-			}
-		})
+	if PUSH_QUEUE != 3 {
+		t.Fatalf("PUSH_QUEUE = %v, want 3", PUSH_QUEUE)
 	}
 }
 
-func TestTakeUint32(t *testing.T) {
-	tests := []struct {
-		name      string
-		input     []byte
-		expected  uint32
-		remaining []byte
-	}{
-		{
-			name:      "Normal uint32",
-			input:     []byte{0x08, 0x00, 0x00, 0x00, 0x01, 0x02},
-			expected:  8,
-			remaining: []byte{0x01, 0x02},
-		},
-		{
-			name:      "Exactly 4 bytes",
-			input:     []byte{0xFF, 0xFF, 0xFF, 0xFF},
-			expected:  0xFFFFFFFF,
-			remaining: []byte{},
-		},
-		{
-			name:      "Less than 4 bytes",
-			input:     []byte{0x01, 0x02},
-			expected:  0,
-			remaining: []byte{},
-		},
-		{
-			name:      "Empty slice",
-			input:     []byte{},
-			expected:  0,
-			remaining: []byte{},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			data := make([]byte, len(tt.input))
-			copy(data, tt.input)
-
-			result := takeUint32(&data)
-
-			if result != tt.expected {
-				t.Errorf("takeUint32() = %v, want %v", result, tt.expected)
-			}
-
-			if !bytes.Equal(data, tt.remaining) {
-				t.Errorf("remaining data = %v, want %v", data, tt.remaining)
-			}
-		})
-	}
-}
-
-// Benchmark tests
-func BenchmarkParseProtocol(b *testing.B) {
-	msg := []byte{
-		0x00,                   // Version
-		0x01,                   // Payload Type (PUSH_QUEUE)
-		0x03, 0x00, 0x00, 0x00, // Key Length (3)
-		0x66, 0x6F, 0x6F, // Key "foo"
-		0x03, 0x00, 0x00, 0x00, // Value Length (3)
-		0x62, 0x61, 0x72, // Value "bar"
-	}
+func BenchmarkUnmarshal(b *testing.B) {
+	frame := []byte{0x01, 0x03, 0x0A, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x66, 0x6F, 0x6F, 0x62, 0x61, 0x72}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := ParseProtocol(msg)
+		_, err := Unmarshal(frame)
 		if err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
-func BenchmarkStringifyProtocol(b *testing.B) {
-	p := Protocol{
-		Version:     0,
-		PayloadType: PUSH_QUEUE,
-		KeyValuePairs: map[string]string{
-			"foo": "bar",
-		},
-	}
+func BenchmarkMarshal(b *testing.B) {
+	msg := PushQueueMessage{QueueName: []byte("foo"), MessageBody: []byte("bar")}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := StringifyProtocol(p)
+		_, err := Marshal(msg)
 		if err != nil {
 			b.Fatal(err)
 		}
