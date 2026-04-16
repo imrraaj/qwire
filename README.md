@@ -74,7 +74,11 @@ The demo client will:
 
 1. create queue `demo`
 2. join queue `demo`
-3. push a message into `demo`
+3. subscribe on the same connection
+4. push an initial demo message into `demo`
+5. keep reading and printing incoming queue messages and status replies
+
+After startup, you can type lines into the client terminal and each line will be pushed into `demo`. Because the same client is subscribed to that queue, it will print the received `PUSH_QUEUE` message back to the terminal.
 
 The server replies with `EMPTY true` for successful commands and broadcasts `PUSH_QUEUE` messages to subscribed clients.
 
