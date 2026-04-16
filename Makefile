@@ -1,7 +1,7 @@
 GO ?= go
 GOCACHE ?= /tmp/go-build
 BUILD_DIR ?= build
-MAIN_BINARY ?= $(BUILD_DIR)/binprot
+MAIN_BINARY ?= $(BUILD_DIR)/qwire
 SERVER_BINARY ?= $(BUILD_DIR)/server
 CLIENT_BINARY ?= $(BUILD_DIR)/client
 

@@ -1,4 +1,4 @@
-# Binary Protocol Specification
+# QWire Protocol Specification
 
 ## Overview
 

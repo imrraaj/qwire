@@ -1,8 +1,8 @@
 package main
 
 import (
-	"binprot/protocol"
 	"net"
+	"qwire/protocol"
 	"testing"
 	"time"
 )

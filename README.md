@@ -1,6 +1,6 @@
-# binprot
+# QWire
 
-`binprot` is a small Go project for experimenting with a binary application protocol and a TCP client/server that speak it end to end.
+`QWire` is a small Go project for experimenting with a binary queue protocol and a TCP client/server that speak it end to end.
 
 The current v1 work focuses on making these parts agree with each other:
 
@@ -36,7 +36,7 @@ Supported payload types:
 - zero-length payload means `false`
 - one-byte payload with value `0x01` means `true`
 
-The full protocol reference lives in `protocol.md`.
+The full QWire protocol reference lives in `protocol.md`.
 
 ## Repository Layout
 

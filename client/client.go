@@ -1,7 +1,6 @@
 package main
 
 import (
-	"binprot/protocol"
 	"bufio"
 	"errors"
 	"fmt"
@@ -9,6 +8,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"qwire/protocol"
 )
 
 const demoQueueName = "demo"
@@ -47,7 +47,7 @@ func printMessage(prefix string, msg protocol.Message) {
 
 func printInstructions() {
 	fmt.Println()
-	fmt.Println("Connected to the queue demo.")
+	fmt.Println("Connected to the QWire queue demo.")
 	fmt.Printf("This client is subscribed to queue %q.\n", demoQueueName)
 	fmt.Println("Anything you type here will be pushed to that queue.")
 	fmt.Println("If you run this client in another terminal and type something there, it will also appear here because both clients are listening on the same queue.")

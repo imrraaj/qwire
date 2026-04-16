@@ -1,12 +1,12 @@
 package main
 
 import (
-	"binprot/protocol"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net"
+	"qwire/protocol"
 	"sync"
 )
 

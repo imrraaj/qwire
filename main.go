@@ -1,8 +1,8 @@
 package main
 
 import (
-	"binprot/protocol"
 	"fmt"
+	"qwire/protocol"
 )
 
 func main() {
