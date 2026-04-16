@@ -2,6 +2,12 @@
 
 `QWire` is a small Go project for experimenting with a binary queue protocol and a TCP client/server that speak it end to end.
 
+## Demo
+
+<video src="./assets/20260416-094915.mp4" controls width="100%"></video>
+
+[Download the demo video](./assets/20260416-094915.mp4)
+
 The current v1 work focuses on making these parts agree with each other:
 
 - `protocol.md`: wire-format specification
