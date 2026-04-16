@@ -1,76 +1,60 @@
 package main
 
 import (
+	"binprot/protocol"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
-	"sync"
-	"time"
 )
 
-func serialize(m Message) []byte {
-	buf := make([]byte, 0)
-	buf = append(buf, byte(len(m.sender)))
-	for _, a := range m.sender {
-		buf = append(buf, byte(a))
+func send(conn net.Conn, msg protocol.Message) {
+	if err := protocol.WriteMessage(conn, msg); err != nil {
+		log.Fatalf("write message: %v", err)
 	}
-
-	buf = append(buf, byte(len(m.receiver)))
-	for _, a := range m.receiver {
-		buf = append(buf, byte(a))
-	}
-	buf = append(buf, byte(len(m.message)))
-	for _, a := range m.message {
-		buf = append(buf, byte(a))
-	}
-	fmt.Println(buf)
-	return buf
 }
 
-type Message struct {
-	id       time.Time
-	sender   string
-	receiver string
-	message  string
+func receive(conn net.Conn) protocol.Message {
+	msg, err := protocol.ReadMessage(conn)
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			log.Fatal("server closed the connection")
+		}
+		log.Fatalf("read message: %v", err)
+	}
+	return msg
 }
 
-func NewMessage(sender, receiver, message string) Message {
-	return Message{
-		sender:   sender,
-		receiver: receiver,
-		message:  message,
-		id:       time.Now(),
+func printMessage(prefix string, msg protocol.Message) {
+	switch msg := msg.(type) {
+	case protocol.EmptyMessage:
+		fmt.Printf("%s EMPTY value=%t\n", prefix, msg.Value)
+	case protocol.CreateQueueMessage:
+		fmt.Printf("%s CREATE_QUEUE queue=%q\n", prefix, msg.QueueName)
+	case protocol.JoinQueueMessage:
+		fmt.Printf("%s JOIN_QUEUE queue=%q\n", prefix, msg.QueueName)
+	case protocol.PushQueueMessage:
+		fmt.Printf("%s PUSH_QUEUE queue=%q body=%q\n", prefix, msg.QueueName, msg.MessageBody)
+	default:
+		fmt.Printf("%s unknown message type %T\n", prefix, msg)
 	}
 }
 
 func main() {
 	conn, err := net.Dial("tcp", "localhost:6969")
 	if err != nil {
-		log.Fatalf("ERROR: %s\n", err)
+		log.Fatalf("dial server: %v", err)
 	}
+	defer conn.Close()
 
-	go (func(conn net.Conn) {
-		for i := 0; i < 10; i++ {
-			_, err := conn.Write(serialize(NewMessage("raj", "priya", "Hello, World\n")))
-			if err != nil {
-				log.Fatalf("ERROR: %s\n", err)
-			}
-		}
-	})(conn)
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go (func(conn net.Conn) {
-		for {
-			buffer := make([]byte, 64*1024)
-			_, err := conn.Read(buffer)
+	send(conn, protocol.CreateQueueMessage{QueueName: []byte("demo")})
+	printMessage("<-", receive(conn))
 
-			if err != nil {
-				log.Printf("error reading from connection: %s\n", err)
-				return
-			}
-			fmt.Printf("%s\n", buffer)
-			fmt.Println()
-		}
-	})(conn)
-	wg.Wait()
+	send(conn, protocol.JoinQueueMessage{QueueName: []byte("demo")})
+	printMessage("<-", receive(conn))
+
+	send(conn, protocol.PushQueueMessage{QueueName: []byte("demo"), MessageBody: []byte("hello from client")})
+	printMessage("<-", receive(conn))
+	printMessage("<-", receive(conn))
 }
